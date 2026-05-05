@@ -17,6 +17,12 @@ Optional env vars:
   COMPOSER_LABELS_JSON           Extra labels merged onto the environment (JSON object)
   RELEASE_TAG                    Stamped onto the environment as label "release"
 
+Flags:
+  --dry-run                      Resolve config, build the Environment proto and
+                                 update_mask, print them, and exit without contacting
+                                 GCP. Useful in CI and for local iteration. Equivalent
+                                 to setting DRY_RUN=1.
+
 Authentication is provided by google-github-actions/auth in CI, which exports
 GOOGLE_APPLICATION_CREDENTIALS pointing at the deployer SA JSON. Locally, run
 `gcloud auth application-default login` or set GOOGLE_APPLICATION_CREDENTIALS.
@@ -24,6 +30,7 @@ GOOGLE_APPLICATION_CREDENTIALS pointing at the deployer SA JSON. Locally, run
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import os
@@ -224,8 +231,34 @@ def _update_mask_for(cfg: dict[str, Any]) -> field_mask_pb2.FieldMask:
     return field_mask_pb2.FieldMask(paths=paths)
 
 
-def main() -> int:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=os.environ.get("DRY_RUN", "").lower() in {"1", "true", "yes"},
+        help="Print the resolved config, Environment proto, and update_mask, then exit "
+        "without calling GCP. Also enabled by setting DRY_RUN=1.",
+    )
+    return parser.parse_args(argv)
+
+
+def _log_resolved(project: str, region: str, env_name: str, cfg: dict[str, Any]) -> None:
+    LOG.info("Resolved configuration:")
+    LOG.info("  project=%s region=%s env=%s", project, region, env_name)
+    LOG.info("  image_version=%s size=%s", cfg["image_version"], cfg["environment_size"])
+    LOG.info("  service_account=%s", cfg.get("service_account") or "(default compute SA)")
+    LOG.info(
+        "  network=%s subnetwork=%s",
+        cfg.get("network") or "(default)",
+        cfg.get("subnetwork") or "(default)",
+    )
+    LOG.info("  labels=%s", cfg["labels"])
+
+
+def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    args = _parse_args(argv)
 
     project = _require("GCP_PROJECT_ID")
     region = _require("GCP_REGION")
@@ -235,15 +268,18 @@ def main() -> int:
     parent = f"projects/{project}/locations/{region}"
     full_name = f"{parent}/environments/{env_name}"
 
-    LOG.info("Resolved configuration:")
-    LOG.info("  project=%s region=%s env=%s", project, region, env_name)
-    LOG.info("  image_version=%s size=%s", cfg["image_version"], cfg["environment_size"])
-    LOG.info("  service_account=%s", cfg.get("service_account") or "(default compute SA)")
-    LOG.info("  network=%s subnetwork=%s", cfg.get("network") or "(default)", cfg.get("subnetwork") or "(default)")
-    LOG.info("  labels=%s", cfg["labels"])
+    _log_resolved(project, region, env_name, cfg)
+
+    environment = _build_environment(parent, env_name, cfg)
+    update_mask = _update_mask_for(cfg)
+
+    if args.dry_run:
+        LOG.info("DRY RUN: skipping GCP calls.")
+        LOG.info("Environment proto:\n%s", environment)
+        LOG.info("Update mask paths (used only when env exists): %s", list(update_mask.paths))
+        return 0
 
     client = service_v1.EnvironmentsClient()
-    environment = _build_environment(parent, env_name, cfg)
 
     try:
         existing = client.get_environment(name=full_name)
@@ -251,7 +287,7 @@ def main() -> int:
         op = client.update_environment(
             name=full_name,
             environment=environment,
-            update_mask=_update_mask_for(cfg),
+            update_mask=update_mask,
         )
     except NotFound:
         LOG.info("Environment %s not found; creating.", full_name)

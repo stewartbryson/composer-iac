@@ -42,6 +42,7 @@ conventional commit on main
 .
 |-- .github/
 |   |-- workflows/
+|   |   |-- ci.yml                  # PR validation: ruff, pytest, dry-run smoke
 |   |   |-- release-please.yml      # cuts releases on main, then calls deploy
 |   |   `-- deploy.yml              # reusable: workflow_call + workflow_dispatch
 |   |-- release-please-config.json
@@ -50,7 +51,11 @@ conventional commit on main
 |   `-- composer.yaml               # non-secret env shape
 |-- scripts/
 |   |-- deploy_composer.py          # idempotent SDK deployer
-|   `-- requirements.txt
+|   |-- requirements.txt
+|   `-- requirements-dev.txt        # pytest + ruff
+|-- tests/
+|   |-- conftest.py
+|   `-- test_deploy_composer.py     # unit tests for the deployer helpers
 |-- version.txt                     # managed by release-please
 `-- README.md
 ```
@@ -97,10 +102,11 @@ If a variable is unset, the deployer falls back to the value in [`config/compose
 
 ## Local dry run
 
+The deployer accepts a `--dry-run` flag (or `DRY_RUN=1`) that resolves the config, builds the `Environment` proto and `update_mask`, prints them, and exits without contacting GCP. Use it to iterate on `config/composer.yaml` without burning the 20-30 minute create cycle.
+
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r scripts/requirements.txt
-gcloud auth application-default login
 
 export GCP_PROJECT_ID=my-proj
 export GCP_REGION=us-central1
@@ -108,10 +114,20 @@ export COMPOSER_ENV_NAME=composer-dev
 export COMPOSER_SERVICE_ACCOUNT=runtime-sa@my-proj.iam.gserviceaccount.com
 export RELEASE_TAG=local-test
 
-python scripts/deploy_composer.py
+python scripts/deploy_composer.py --dry-run
 ```
 
-The first create can take 20-30 minutes; updates are usually much faster.
+For a real deploy, drop the `--dry-run` flag and authenticate first with `gcloud auth application-default login` (or set `GOOGLE_APPLICATION_CREDENTIALS`).
+
+## Running tests locally
+
+```bash
+pip install -r scripts/requirements-dev.txt
+ruff check scripts/ tests/
+pytest -v
+```
+
+The same checks run automatically on every pull request via [`.github/workflows/ci.yml`](.github/workflows/ci.yml): ruff, workflow-YAML parse, `py_compile` of the deployer, the pytest suite, and a `--dry-run` smoke invocation against fake env vars.
 
 ## Cutting a release
 
