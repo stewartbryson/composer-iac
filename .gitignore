@@ -87,6 +87,10 @@ ipython_config.py
 
 # Environments
 .env
+.env.*
+!.env.example
+!.env.template
+!.env.sample
 .venv
 env/
 venv/
@@ -110,6 +114,29 @@ dmypy.json
 .DS_Store
 Thumbs.db
 
-# Local GCP service-account keys (never commit these)
+# --- Secrets / credentials (never commit) ---
+# Service-account keys and GCP credential files
 *-sa-key.json
 service-account*.json
+gcp-key*.json
+gcp-credentials*.json
+google-credentials*.json
+keyfile*.json
+credentials.json
+application_default_credentials.json
+
+# Generic secret files
+secrets.yml
+secrets.yaml
+*.secrets.yml
+*.secrets.yaml
+
+# Cryptographic key material
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
