@@ -1,0 +1,46 @@
+# Non-secret defaults for the Cloud Composer 3 environment.
+# Any value can be overridden by an environment variable in scripts/deploy_composer.py
+# (e.g. COMPOSER_IMAGE_VERSION, COMPOSER_ENV_SIZE, COMPOSER_SERVICE_ACCOUNT, ...).
+
+# Composer 3 image version. Pick from:
+#   gcloud composer images list --location=<REGION> --filter="imageVersionId ~ composer-3"
+image_version: composer-3-airflow-2.10.5
+
+# SMALL | MEDIUM | LARGE. SMALL is suitable for prototypes.
+environment_size: SMALL
+
+# Runtime service account email used by the Composer environment itself.
+# Leave blank to fall back to the project's default compute SA.
+service_account: ""
+
+# Optional VPC. Empty = default network. Use full self-links for shared VPC.
+network: ""
+subnetwork: ""
+
+# Workload sizing (Composer 3). Values below match Google's documented SMALL minimums.
+workloads:
+  scheduler:
+    cpu: 0.5
+    memory_gb: 2.0
+    storage_gb: 1.0
+    count: 1
+  web_server:
+    cpu: 0.5
+    memory_gb: 2.0
+    storage_gb: 1.0
+  worker:
+    cpu: 0.5
+    memory_gb: 2.0
+    storage_gb: 1.0
+    min_count: 1
+    max_count: 3
+  triggerer:
+    cpu: 0.5
+    memory_gb: 0.5
+    count: 1
+
+# Static labels applied to the environment. The deployer also stamps a
+# "release" label from RELEASE_TAG.
+labels:
+  managed-by: github-actions
+  component: composer
