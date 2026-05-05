@@ -10,24 +10,30 @@ Lightweight, code-driven provisioning for a **Cloud Composer 3** environment, pl
 conventional commit on main
         |
         v
-  release-please.yml  --opens-->  Release PR
-        ^                              |
-        |                              | merge
-        |                              v
-  bumps version.txt           GitHub Release published
-                                       |
-                                       v
-                              deploy.yml (release:published)
-                                       |
-                                       v
-                       python scripts/deploy_composer.py
-                                       |
-                              EnvironmentsClient
-                            (create or update + LRO)
+  release-please.yml
+        |
+        |--(no release yet)--> opens / updates Release PR  ----.
+        |                                                      |
+        |                                                      | merge Release PR
+        |                                                      v
+        |<-------------------------- push to main runs release-please.yml again
+        |
+        v
+  release_created == true
+        |
+        v
+  deploy job (calls deploy.yml via workflow_call)
+        |
+        v
+  python scripts/deploy_composer.py
+        |
+        v
+  EnvironmentsClient  (create or update + LRO)
 ```
 
 - `release-please` watches `main`, opens/maintains a Release PR from your conventional commits, bumps `version.txt`, and creates a GitHub Release when that PR is merged.
-- The `deploy-composer` workflow fires on `release: published` (and on manual `workflow_dispatch`), authenticates with the deployer SA JSON, and runs `scripts/deploy_composer.py`.
+- Inside the same `release-please.yml` run that creates the release, a follow-up `deploy` job calls the reusable `deploy.yml` workflow (`workflow_call`) and applies the environment. We do this in-process instead of listening to `release: published` because GitHub's default `GITHUB_TOKEN` cannot trigger downstream workflows.
+- `deploy.yml` is also exposed via `workflow_dispatch` for ad-hoc redeploys.
 - The deployer is idempotent: it calls `get_environment`, then either `create_environment` or `update_environment` with a tight `update_mask`. Either path waits on the long-running operation.
 
 ## Repo layout
@@ -36,8 +42,8 @@ conventional commit on main
 .
 |-- .github/
 |   |-- workflows/
-|   |   |-- release-please.yml      # cuts releases on main
-|   |   `-- deploy.yml              # deploys on release:published
+|   |   |-- release-please.yml      # cuts releases on main, then calls deploy
+|   |   `-- deploy.yml              # reusable: workflow_call + workflow_dispatch
 |   |-- release-please-config.json
 |   `-- .release-please-manifest.json
 |-- config/
@@ -111,9 +117,37 @@ The first create can take 20-30 minutes; updates are usually much faster.
 
 1. Land conventional commits (`feat:`, `fix:`, etc.) on `main`.
 2. Merge the Release PR opened by `release-please`. This bumps `version.txt` and publishes a GitHub Release.
-3. The `deploy-composer` workflow fires automatically and reapplies the environment with the new release tag stamped as a `release` label on the Composer env.
+3. The same `release-please.yml` run that creates the release then invokes the `deploy` job (which calls `deploy.yml` via `workflow_call`) and reapplies the environment, stamping the new tag onto the Composer env's `release` label.
 
-You can also trigger an out-of-band deploy via the Actions UI ("Run workflow" on `deploy-composer`).
+You can also trigger an out-of-band deploy via the Actions UI ("Run workflow" on `deploy-composer`), optionally specifying a tag or branch in the `ref` input.
+
+### Commit message format
+
+`release-please` only reacts to commits that conform to [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/). The grammar is:
+
+```
+<type>[optional scope]: <description>
+```
+
+Working examples:
+
+```text
+feat: add deploy_composer.py
+fix(deploy): correct triggerer memory default
+feat(workflows): wire release-please into deploy
+feat!: drop Composer 2 image versions     # breaking change
+docs: clarify SA setup
+```
+
+Common mistakes that cause `release-please` to silently ignore your commit:
+
+```text
+feat(gitignore)              # missing ': <description>'
+feat(deployment created)     # scope must be a single noun, no spaces
+Initial commit               # not a conventional commit at all
+```
+
+If you tend to squash-merge PRs, set the squash commit subject to a conventional message — the PR title is what `release-please` will see.
 
 ## Out of scope
 

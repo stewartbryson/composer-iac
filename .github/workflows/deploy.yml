@@ -1,13 +1,18 @@
 name: deploy-composer
 
 on:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref or tag to deploy
+        required: false
+        type: string
   workflow_dispatch:
     inputs:
       ref:
         description: Git ref to deploy (defaults to main)
         required: false
+        type: string
         default: main
 
 concurrency:
@@ -22,7 +27,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.ref || github.ref }}
+          ref: ${{ inputs.ref || github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -50,4 +55,4 @@ jobs:
           COMPOSER_SERVICE_ACCOUNT: ${{ secrets.COMPOSER_SERVICE_ACCOUNT }}
           COMPOSER_NETWORK: ${{ vars.COMPOSER_NETWORK }}
           COMPOSER_SUBNETWORK: ${{ vars.COMPOSER_SUBNETWORK }}
-          RELEASE_TAG: ${{ github.event.release.tag_name || github.sha }}
+          RELEASE_TAG: ${{ inputs.ref || github.sha }}
